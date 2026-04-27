@@ -6,9 +6,7 @@ const { Server } = require("socket.io");
 const cors = require("cors");
 
 const app = express();
-
-const ALLOWED_ORIGIN = process.env.FRONTEND_URL || "https://borderland-game-five.vercel.app";
-
+const ALLOWED_ORIGIN = process.env.FRONTEND_URL || "*";
 app.use(cors({ origin: ALLOWED_ORIGIN }));
 
 const server = http.createServer(app);
@@ -32,117 +30,51 @@ const CONFIG = {
 };
 
 const RULES_POOL = [
-  {
-    id: "exact_number",
-    name: "NÚMERO EXACTO",
-    description: "Si un jugador elige el número exacto del resultado, el resto suma +2 puntos",
-    icon: "🎯"
-  },
-  {
-    id: "duplicate_number",
-    name: "NÚMERO DUPLICADO",
-    description: "Si dos o más jugadores eligen el mismo número, ambos suman +1 punto extra",
-    icon: "👥"
-  },
-  {
-    id: "reduced_range",
-    name: "RANGO REDUCIDO",
-    description: "Solo se pueden elegir números entre 1 y 50. Fuera del rango = +2 puntos automáticos",
-    icon: "📏"
-  },
-  {
-    id: "inverted_number",
-    name: "NÚMERO INVERTIDO",
-    description: "Tu número se transforma: se usa (100 - tu número) para el cálculo",
-    icon: "🔄"
-  },
-  {
-    id: "reduced_time",
-    name: "TIEMPO REDUCIDO",
-    description: "Las rondas pasan de 30 segundos a 15 segundos",
-    icon: "⏱️"
-  },
-  {
-    id: "double_punishment",
-    name: "DOBLE CASTIGO",
-    description: "El jugador MÁS LEJANO al resultado suma +2 en vez de +1",
-    icon: "💀"
-  },
-  {
-    id: "blind_number",
-    name: "NÚMERO CIEGO",
-    description: "No puedes ver cuántos jugadores han enviado su número",
-    icon: "🙈"
-  },
-  {
-    id: "no_repeat",
-    name: "PROHIBIDO REPETIR",
-    description: "No puedes elegir el mismo número que elegiste en la ronda anterior. Si lo haces, sumas +2",
-    icon: "🚫"
-  },
-  {
-    id: "sudden_death",
-    name: "MUERTE SÚBITA",
-    description: "El multiplicador cambia de ×0.8 a ×0.5",
-    icon: "⚡"
-  }
+  { id: "exact_number", name: "NÚMERO EXACTO", description: "Si un jugador elige el número exacto del resultado, el resto suma +2 puntos", icon: "🎯" },
+  { id: "duplicate_number", name: "NÚMERO DUPLICADO", description: "Si dos o más jugadores eligen el mismo número, ambos suman +1 punto extra", icon: "👥" },
+  { id: "reduced_range", name: "RANGO REDUCIDO", description: "Solo se pueden elegir números entre 1 y 50. Fuera del rango = +2 puntos automáticos", icon: "📏" },
+  { id: "inverted_number", name: "NÚMERO INVERTIDO", description: "Tu número se transforma: se usa (100 - tu número) para el cálculo", icon: "🔄" },
+  { id: "reduced_time", name: "TIEMPO REDUCIDO", description: "Las rondas pasan de 30 segundos a 15 segundos", icon: "⏱️" },
+  { id: "double_punishment", name: "DOBLE CASTIGO", description: "El jugador MÁS LEJANO al resultado suma +2 en vez de +1", icon: "💀" },
+  { id: "blind_number", name: "NÚMERO CIEGO", description: "No puedes ver cuántos jugadores han enviado su número", icon: "🙈" },
+  { id: "no_repeat", name: "PROHIBIDO REPETIR", description: "No puedes elegir el mismo número que elegiste en la ronda anterior. Si lo haces, sumas +2", icon: "🚫" },
+  { id: "sudden_death", name: "MUERTE SÚBITA", description: "El multiplicador cambia de ×0.8 a ×0.5", icon: "⚡" }
 ];
 
 const FINAL_RULE = {
-  id: "zero_vs_hundred",
-  name: "CERO VS CIEN",
+  id: "zero_vs_hundred", name: "CERO VS CIEN",
   description: "Si un jugador elige 0 y el otro elige 100, el que eligió 0 gana automáticamente la ronda",
   icon: "🆚"
 };
 
 let game = createFreshGame();
 const playerPhotos = {};
+let finishedTimeout = null;
 
 function createFreshGame() {
   return {
-    phase: "lobby",
-    round: 1,
-    timer: 0,
-    players: [],
-    numbers: {},
-    average: null,
-    target: null,
-    winnerId: null,
-    config: { ...CONFIG },
-    roundHistory: [],
-    eliminatedThisRound: [],
-    activeRules: [],
-    pendingRules: [],
-    shuffledRules: [],
-    previousNumbers: {},
-    currentRuleIndex: 0,
-    tutorialSlide: 0,
+    phase: "lobby", round: 1, timer: 0, players: [], numbers: {},
+    average: null, target: null, winnerId: null,
+    config: { ...CONFIG }, roundHistory: [], eliminatedThisRound: [],
+    activeRules: [], pendingRules: [], shuffledRules: [],
+    previousNumbers: {}, currentRuleIndex: 0, tutorialSlide: 0,
     furthestPlayerId: null
   };
 }
 
-function getAlivePlayers() {
-  return game.players.filter(p => p.alive);
-}
+function getAlivePlayers() { return game.players.filter(p => p.alive); }
 
 function getPublicGameState() {
-  return {
-    ...game,
-    players: game.players.map(p => ({ ...p, photo: undefined }))
-  };
+  return { ...game, players: game.players.map(p => ({ ...p, photo: undefined })) };
 }
 
 function getPlayerPhotosMap() {
   const map = {};
-  game.players.forEach(p => {
-    map[p.id] = playerPhotos[p.id] || null;
-  });
+  game.players.forEach(p => { map[p.id] = playerPhotos[p.id] || null; });
   return map;
 }
 
-function broadcastState() {
-  io.emit("gameState", getPublicGameState());
-}
+function broadcastState() { io.emit("gameState", getPublicGameState()); }
 
 function reassignHost() {
   if (game.players.length > 0 && !game.players.some(p => p.host)) {
@@ -160,17 +92,9 @@ function shuffleArray(array) {
   return shuffled;
 }
 
-function isRuleActive(ruleId) {
-  return game.activeRules.some(r => r.id === ruleId);
-}
-
-function getCurrentMultiplier() {
-  return isRuleActive("sudden_death") ? 0.5 : CONFIG.MULTIPLIER;
-}
-
-function getCurrentRoundTime() {
-  return isRuleActive("reduced_time") ? 15 : CONFIG.ROUND_SECONDS;
-}
+function isRuleActive(ruleId) { return game.activeRules.some(r => r.id === ruleId); }
+function getCurrentMultiplier() { return isRuleActive("sudden_death") ? 0.5 : CONFIG.MULTIPLIER; }
+function getCurrentRoundTime() { return isRuleActive("reduced_time") ? 15 : CONFIG.ROUND_SECONDS; }
 
 let activeInterval = null;
 let resultsTimeout = null;
@@ -178,6 +102,19 @@ let resultsTimeout = null;
 function clearAllTimers() {
   if (activeInterval) { clearInterval(activeInterval); activeInterval = null; }
   if (resultsTimeout) { clearTimeout(resultsTimeout); resultsTimeout = null; }
+  if (finishedTimeout) { clearTimeout(finishedTimeout); finishedTimeout = null; }
+}
+
+function autoResetToLobby() {
+  // Auto-reset after 30 seconds in finished phase
+  finishedTimeout = setTimeout(() => {
+    if (game.phase === "finished") {
+      console.log("Auto-resetting to lobby...");
+      game = createFreshGame();
+      broadcastState();
+      io.emit("playerPhotos", {});
+    }
+  }, 30000);
 }
 
 function startCountdown() {
@@ -228,14 +165,10 @@ function endRound() {
       game.numbers[p.id] = Math.floor(Math.random() * 101);
     }
   });
-
   game.phase = "results";
   calculateResults();
   broadcastState();
-
-  resultsTimeout = setTimeout(() => {
-    afterResults();
-  }, CONFIG.RESULTS_DURATION);
+  resultsTimeout = setTimeout(() => { afterResults(); }, CONFIG.RESULTS_DURATION);
 }
 
 function calculateResults() {
@@ -243,34 +176,21 @@ function calculateResults() {
   const multiplier = getCurrentMultiplier();
 
   if (isRuleActive("zero_vs_hundred") && alivePlayers.length === 2) {
-    const p1 = alivePlayers[0];
-    const p2 = alivePlayers[1];
-    const n1 = game.numbers[p1.id];
-    const n2 = game.numbers[p2.id];
-
+    const p1 = alivePlayers[0], p2 = alivePlayers[1];
+    const n1 = game.numbers[p1.id], n2 = game.numbers[p2.id];
     if ((n1 === 0 && n2 === 100) || (n1 === 100 && n2 === 0)) {
       const zeroPlayer = n1 === 0 ? p1 : p2;
       const hundredPlayer = n1 === 100 ? p1 : p2;
-
       game.average = 50;
       game.target = 50 * multiplier;
       game.winnerId = zeroPlayer.id;
-
       hundredPlayer.lives += 1;
       if (hundredPlayer.lives >= CONFIG.MAX_LIVES) {
         hundredPlayer.alive = false;
         game.eliminatedThisRound.push(hundredPlayer.id);
       }
-
       game.previousNumbers = { ...game.numbers };
-      game.roundHistory.push({
-        round: game.round,
-        numbers: { ...game.numbers },
-        average: game.average,
-        target: game.target,
-        winnerId: game.winnerId,
-        specialRule: "zero_vs_hundred"
-      });
+      game.roundHistory.push({ round: game.round, numbers: { ...game.numbers }, average: game.average, target: game.target, winnerId: game.winnerId, specialRule: "zero_vs_hundred" });
       return;
     }
   }
@@ -278,9 +198,7 @@ function calculateResults() {
   let effectiveNumbers = {};
   alivePlayers.forEach(p => {
     let num = game.numbers[p.id];
-    if (isRuleActive("inverted_number")) {
-      num = 100 - num;
-    }
+    if (isRuleActive("inverted_number")) num = 100 - num;
     effectiveNumbers[p.id] = num;
   });
 
@@ -290,18 +208,13 @@ function calculateResults() {
   const sum = values.reduce((a, b) => a + b, 0);
   const avg = sum / values.length;
   const target = avg * multiplier;
-
   game.average = Math.round(avg * 100) / 100;
   game.target = Math.round(target * 100) / 100;
 
-  let playerDistances = alivePlayers
-    .map(p => ({
-      id: p.id,
-      number: effectiveNumbers[p.id],
-      originalNumber: game.numbers[p.id],
-      diff: Math.abs(effectiveNumbers[p.id] - target)
-    }))
-    .sort((a, b) => a.diff - b.diff);
+  let playerDistances = alivePlayers.map(p => ({
+    id: p.id, number: effectiveNumbers[p.id], originalNumber: game.numbers[p.id],
+    diff: Math.abs(effectiveNumbers[p.id] - target)
+  })).sort((a, b) => a.diff - b.diff);
 
   const minDiff = playerDistances[0].diff;
   const winners = playerDistances.filter(p => Math.abs(p.diff - minDiff) < 0.0001);
@@ -313,13 +226,9 @@ function calculateResults() {
   game.furthestPlayerId = furthest.sort((a, b) => b.number - a.number)[0].id;
 
   let exactMatchPlayerId = null;
-  const roundedTarget = Math.round(target);
   if (isRuleActive("exact_number")) {
-    alivePlayers.forEach(p => {
-      if (game.numbers[p.id] === roundedTarget) {
-        exactMatchPlayerId = p.id;
-      }
-    });
+    const roundedTarget = Math.round(target);
+    alivePlayers.forEach(p => { if (game.numbers[p.id] === roundedTarget) exactMatchPlayerId = p.id; });
   }
 
   let duplicatedPlayerIds = [];
@@ -330,27 +239,20 @@ function calculateResults() {
       if (!numberCount[num]) numberCount[num] = [];
       numberCount[num].push(p.id);
     });
-    Object.values(numberCount).forEach(ids => {
-      if (ids.length >= 2) duplicatedPlayerIds.push(...ids);
-    });
+    Object.values(numberCount).forEach(ids => { if (ids.length >= 2) duplicatedPlayerIds.push(...ids); });
   }
 
   let repeatedPlayerIds = [];
   if (isRuleActive("no_repeat")) {
     alivePlayers.forEach(p => {
-      if (game.previousNumbers[p.id] !== undefined &&
-          game.numbers[p.id] === game.previousNumbers[p.id]) {
+      if (game.previousNumbers[p.id] !== undefined && game.numbers[p.id] === game.previousNumbers[p.id])
         repeatedPlayerIds.push(p.id);
-      }
     });
   }
 
   let outOfRangePlayerIds = [];
   if (isRuleActive("reduced_range")) {
-    alivePlayers.forEach(p => {
-      const num = game.numbers[p.id];
-      if (num < 1 || num > 50) outOfRangePlayerIds.push(p.id);
-    });
+    alivePlayers.forEach(p => { if (game.numbers[p.id] < 1 || game.numbers[p.id] > 50) outOfRangePlayerIds.push(p.id); });
   }
 
   alivePlayers.forEach(p => {
@@ -367,7 +269,6 @@ function calculateResults() {
       if (repeatedPlayerIds.includes(p.id)) p.lives += 2;
       if (outOfRangePlayerIds.includes(p.id)) p.lives += 2;
     }
-
     if (p.lives >= CONFIG.MAX_LIVES && p.alive) {
       p.alive = false;
       game.eliminatedThisRound.push(p.id);
@@ -376,18 +277,10 @@ function calculateResults() {
 
   game.previousNumbers = { ...game.numbers };
   game.roundHistory.push({
-    round: game.round,
-    numbers: { ...game.numbers },
-    effectiveNumbers: { ...effectiveNumbers },
-    average: game.average,
-    target: game.target,
-    winnerId: game.winnerId,
-    furthestPlayerId: game.furthestPlayerId,
-    exactMatchPlayerId,
-    duplicatedPlayerIds,
-    repeatedPlayerIds,
-    outOfRangePlayerIds,
-    eliminated: [...game.eliminatedThisRound]
+    round: game.round, numbers: { ...game.numbers }, effectiveNumbers: { ...effectiveNumbers },
+    average: game.average, target: game.target, winnerId: game.winnerId,
+    furthestPlayerId: game.furthestPlayerId, exactMatchPlayerId, duplicatedPlayerIds,
+    repeatedPlayerIds, outOfRangePlayerIds, eliminated: [...game.eliminatedThisRound]
   });
 }
 
@@ -402,25 +295,16 @@ function afterResults() {
         game.pendingRules.push(game.shuffledRules.shift());
       }
     });
-
-    if (game.pendingRules.length > 0) {
-      game.currentRuleIndex = 0;
-      showNextRule();
-    } else {
-      checkGameEnd();
-    }
+    if (game.pendingRules.length > 0) { game.currentRuleIndex = 0; showNextRule(); }
+    else { checkGameEnd(); }
   } else {
     checkGameEnd();
   }
 }
 
 function showNextRule() {
-  if (game.currentRuleIndex >= game.pendingRules.length) {
-    checkGameEnd();
-    return;
-  }
-  const rule = game.pendingRules[game.currentRuleIndex];
-  game.activeRules.push(rule);
+  if (game.currentRuleIndex >= game.pendingRules.length) { checkGameEnd(); return; }
+  game.activeRules.push(game.pendingRules[game.currentRuleIndex]);
   game.phase = "new-rule";
   broadcastState();
 }
@@ -431,6 +315,7 @@ function checkGameEnd() {
     game.phase = "finished";
     clearAllTimers();
     broadcastState();
+    autoResetToLobby();
     return;
   }
   game.round++;
@@ -439,7 +324,6 @@ function checkGameEnd() {
 
 io.on("connection", (socket) => {
   console.log(`Conectado: ${socket.id}`);
-
   socket.emit("gameState", getPublicGameState());
   socket.emit("playerPhotos", getPlayerPhotosMap());
 
@@ -457,16 +341,8 @@ io.on("connection", (socket) => {
       socket.emit("error", { message: "Nombre requerido" });
       return;
     }
-
     const isHost = game.players.length === 0;
-    game.players.push({
-      id: socket.id,
-      name: name.trim().substring(0, 15),
-      lives: 0,
-      host: isHost,
-      alive: true
-    });
-
+    game.players.push({ id: socket.id, name: name.trim().substring(0, 15), lives: 0, host: isHost, alive: true });
     if (photo) playerPhotos[socket.id] = photo;
     broadcastState();
     io.emit("playerPhotos", getPlayerPhotosMap());
@@ -498,10 +374,8 @@ io.on("connection", (socket) => {
     const player = game.players.find(p => p.id === socket.id);
     if (!player || !player.alive) return;
     if (game.numbers[socket.id] !== undefined) return;
-
     const parsed = Number(number);
     if (isNaN(parsed) || parsed < 0 || parsed > 100 || !Number.isInteger(parsed)) return;
-
     game.numbers[socket.id] = parsed;
 
     if (!isRuleActive("blind_number")) {
@@ -512,10 +386,7 @@ io.on("connection", (socket) => {
 
     const aliveCount = getAlivePlayers().length;
     const submittedCount = Object.keys(game.numbers).length;
-    if (submittedCount >= aliveCount) {
-      clearAllTimers();
-      endRound();
-    }
+    if (submittedCount >= aliveCount) { clearAllTimers(); endRound(); }
   });
 
   socket.on("nextRule", () => {
@@ -530,14 +401,11 @@ io.on("connection", (socket) => {
     const player = game.players.find(p => p.id === socket.id);
     if (!player || !player.host) return;
     clearAllTimers();
-    const currentPlayers = game.players.map(p => ({
-      ...p,
-      lives: 0,
-      alive: true
-    }));
+    const currentPlayers = game.players.map(p => ({ ...p, lives: 0, alive: true }));
     game = createFreshGame();
     game.players = currentPlayers;
     broadcastState();
+    io.emit("playerPhotos", getPlayerPhotosMap());
   });
 
   socket.on("disconnect", () => {
@@ -548,10 +416,19 @@ io.on("connection", (socket) => {
     reassignHost();
 
     if (game.phase !== "lobby" && game.phase !== "finished" && game.phase !== "tutorial") {
+      if (game.players.length === 0) {
+        clearAllTimers();
+        game = createFreshGame();
+        broadcastState();
+        io.emit("playerPhotos", {});
+        return;
+      }
       const alivePlayers = getAlivePlayers();
       if (alivePlayers.length <= 1) {
         clearAllTimers();
         game.phase = "finished";
+        broadcastState();
+        autoResetToLobby();
       }
     }
 

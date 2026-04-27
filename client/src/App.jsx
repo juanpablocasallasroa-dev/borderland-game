@@ -5,11 +5,13 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:4000";
 const socket = io(BACKEND_URL, {
   reconnection: true,
   reconnectionDelay: 1000,
-  reconnectionAttempts: 10
+  reconnectionDelayMax: 5000,
+  reconnectionAttempts: Infinity,
+  timeout: 20000
 });
 
 // ============================================
-// SOUND MANAGER - MP3 Files
+// SOUND MANAGER
 // ============================================
 const sounds = {};
 const soundFiles = [
@@ -20,6 +22,7 @@ const soundFiles = [
 ];
 
 let audioUnlocked = false;
+let globalMuted = false;
 
 function loadSounds() {
   soundFiles.forEach(name => {
@@ -36,8 +39,6 @@ function loadSounds() {
 
 function unlockAudio() {
   if (audioUnlocked) return;
-
-  // Intentar reproducir y pausar cada sonido para desbloquear
   Object.values(sounds).forEach(audio => {
     try {
       const vol = audio.volume;
@@ -53,7 +54,6 @@ function unlockAudio() {
     } catch (e) {}
   });
 
-  // También crear AudioContext para desbloquear completamente
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const buffer = ctx.createBuffer(1, 1, 22050);
@@ -68,18 +68,17 @@ function unlockAudio() {
 }
 
 function playSound(name, { loop = false, volume = 0.7 } = {}) {
+  if (globalMuted) return;
   try {
     const original = sounds[name];
     if (!original) return;
 
     if (loop) {
-      // Para loops usar el audio original
       original.currentTime = 0;
       original.loop = true;
       original.volume = Math.max(0, Math.min(1, volume));
       original.play().catch(() => {});
     } else {
-      // Para efectos clonar para permitir superposición
       const clone = original.cloneNode(true);
       clone.volume = Math.max(0, Math.min(1, volume));
       clone.loop = false;
@@ -177,11 +176,22 @@ function App() {
   const [connected, setConnected] = useState(true);
   const [tutorialSlide, setTutorialSlide] = useState(0);
   const [tutorialDone, setTutorialDone] = useState(false);
+  const [muted, setMuted] = useState(false);
   const errorTimeout = useRef(null);
   const prevPhase = useRef(null);
   const prevTimer = useRef(null);
 
-  // Load sounds + unlock on first interaction
+  // Toggle mute
+  const toggleMute = () => {
+    const newMuted = !muted;
+    setMuted(newMuted);
+    globalMuted = newMuted;
+    if (newMuted) {
+      stopAllSounds();
+    }
+  };
+
+  // Load sounds + unlock
   useEffect(() => {
     loadSounds();
 
@@ -213,6 +223,7 @@ function App() {
     socket.on("error", ({ message }) => showError(message));
     socket.on("connect", () => setConnected(true));
     socket.on("disconnect", () => setConnected(false));
+    socket.on("reconnect", () => setConnected(true));
 
     return () => {
       socket.off("gameState");
@@ -221,6 +232,7 @@ function App() {
       socket.off("error");
       socket.off("connect");
       socket.off("disconnect");
+      socket.off("reconnect");
     };
   }, []);
 
@@ -339,26 +351,47 @@ function App() {
   const handlePhotoSelect = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-      showError("Foto muy grande (máx 2MB)");
+    if (file.size > 5 * 1024 * 1024) {
+      showError("Foto muy grande (máx 5MB)");
       return;
     }
-    setPhotoFile(file);
+
+    // Comprimir imagen para móviles
     const reader = new FileReader();
-    reader.onloadend = () => setPhotoPreview(reader.result);
+    reader.onloadend = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const maxSize = 400;
+        let w = img.width;
+        let h = img.height;
+
+        if (w > h) {
+          if (w > maxSize) { h = h * maxSize / w; w = maxSize; }
+        } else {
+          if (h > maxSize) { w = w * maxSize / h; h = maxSize; }
+        }
+
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+
+        const compressed = canvas.toDataURL("image/jpeg", 0.7);
+        setPhotoPreview(compressed);
+        setPhotoFile(compressed);
+      };
+      img.src = reader.result;
+    };
     reader.readAsDataURL(file);
   };
 
   const handleJoin = () => {
     if (!name.trim()) { showError("Escribe tu nombre"); return; }
     if (!photoFile) { showError("Sube una foto"); return; }
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      socket.emit("joinGame", { name: name.trim(), photo: reader.result });
-      setJoined(true);
-      playSound("join", { volume: 0.5 });
-    };
-    reader.readAsDataURL(photoFile);
+    socket.emit("joinGame", { name: name.trim(), photo: photoFile });
+    setJoined(true);
+    playSound("join", { volume: 0.5 });
   };
 
   const handleSubmit = () => {
@@ -376,6 +409,19 @@ function App() {
     setNumber(n);
     playSound("select", { volume: 0.2 });
   };
+
+  // ============================================
+  // MUTE BUTTON (shown on all screens)
+  // ============================================
+  const MuteButton = () => (
+    <button
+      className="mute-btn"
+      onClick={toggleMute}
+      title={muted ? "Activar sonido" : "Silenciar"}
+    >
+      {muted ? "🔇" : "🔊"}
+    </button>
+  );
 
   // ============================================
   // RENDER: Connection
@@ -402,17 +448,44 @@ function App() {
   if (!joined) {
     return (
       <div className="screen register-screen">
+        <MuteButton />
         {error && <div className="error-toast">{error}</div>}
         <h1>BORDERLAND</h1>
         <div className="subtitle">King of Diamonds</div>
         <div className="register-form">
-          <div className="photo-upload">
+          <label className="photo-upload">
             {photoPreview ? (
               <img src={photoPreview} alt="preview" />
             ) : (
               <span className="placeholder">📷</span>
             )}
-            <input type="file" accept="image/*" capture="environment" onChange={handlePhotoSelect} />
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handlePhotoSelect}
+            />
+          </label>
+          <div className="photo-buttons">
+            <label className="btn photo-btn">
+              📷 CÁMARA
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handlePhotoSelect}
+                style={{ display: "none" }}
+              />
+            </label>
+            <label className="btn photo-btn">
+              🖼️ GALERÍA
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handlePhotoSelect}
+                style={{ display: "none" }}
+              />
+            </label>
           </div>
           <input
             type="text" placeholder="TU NOMBRE" value={name}
@@ -433,6 +506,7 @@ function App() {
   if (gameState.phase === "lobby") {
     return (
       <div className="screen lobby-screen">
+        <MuteButton />
         {error && <div className="error-toast">{error}</div>}
         <h1>SALA DE ESPERA</h1>
         <div className="player-count">
@@ -473,6 +547,7 @@ function App() {
 
     return (
       <div className="screen tutorial-screen" style={{ background: slide.bg }}>
+        <MuteButton />
         <div className="tutorial-progress">
           {TUTORIAL_SLIDES.map((_, i) => (
             <div key={i} className={`tutorial-dot ${i <= tutorialSlide ? "active" : ""}`} />
@@ -517,6 +592,7 @@ function App() {
   if (gameState.phase === "countdown") {
     return (
       <div className="screen countdown-screen">
+        <MuteButton />
         <div className="round-indicator">RONDA {gameState.round}</div>
         <div className="countdown-number">{gameState.timer}</div>
 
@@ -545,6 +621,7 @@ function App() {
 
     return (
       <div className="screen round-screen">
+        <MuteButton />
         {error && <div className="error-toast">{error}</div>}
 
         <div className="round-header">
@@ -624,6 +701,7 @@ function App() {
 
     return (
       <div className={`results-screen ${resultsStep >= 5 ? "flash" : ""}`}>
+        <MuteButton />
         <div className="results-round-label">
           RONDA {gameState.round} — RESULTADOS
         </div>
@@ -728,6 +806,7 @@ function App() {
 
     return (
       <div className="screen new-rule-screen">
+        <MuteButton />
         <div className="new-rule-header">NUEVA REGLA</div>
 
         <div className="new-rule-card">
@@ -773,6 +852,7 @@ function App() {
 
     return (
       <div className="screen finished-screen">
+        <MuteButton />
         <h1>SUPERVIVIENTE</h1>
         {winner && (
           <div className="winner-display">

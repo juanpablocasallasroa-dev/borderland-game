@@ -6,13 +6,18 @@ const { Server } = require("socket.io");
 const cors = require("cors");
 
 const app = express();
-app.use(cors());
+
+const ALLOWED_ORIGIN = process.env.FRONTEND_URL || "https://borderland-game-five.vercel.app";
+
+app.use(cors({ origin: ALLOWED_ORIGIN }));
 
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: { origin: "*" },
-  maxHttpBufferSize: 5e6
+  cors: { origin: ALLOWED_ORIGIN },
+  maxHttpBufferSize: 10e6,
+  pingTimeout: 30000,
+  pingInterval: 10000
 });
 
 const CONFIG = {
@@ -91,6 +96,7 @@ const FINAL_RULE = {
 };
 
 let game = createFreshGame();
+const playerPhotos = {};
 
 function createFreshGame() {
   return {
@@ -115,8 +121,6 @@ function createFreshGame() {
   };
 }
 
-const playerPhotos = {};
-
 function getAlivePlayers() {
   return game.players.filter(p => p.alive);
 }
@@ -124,10 +128,7 @@ function getAlivePlayers() {
 function getPublicGameState() {
   return {
     ...game,
-    players: game.players.map(p => ({
-      ...p,
-      photo: undefined
-    }))
+    players: game.players.map(p => ({ ...p, photo: undefined }))
   };
 }
 
@@ -175,14 +176,8 @@ let activeInterval = null;
 let resultsTimeout = null;
 
 function clearAllTimers() {
-  if (activeInterval) {
-    clearInterval(activeInterval);
-    activeInterval = null;
-  }
-  if (resultsTimeout) {
-    clearTimeout(resultsTimeout);
-    resultsTimeout = null;
-  }
+  if (activeInterval) { clearInterval(activeInterval); activeInterval = null; }
+  if (resultsTimeout) { clearTimeout(resultsTimeout); resultsTimeout = null; }
 }
 
 function startCountdown() {
@@ -268,7 +263,6 @@ function calculateResults() {
       }
 
       game.previousNumbers = { ...game.numbers };
-
       game.roundHistory.push({
         round: game.round,
         numbers: { ...game.numbers },
@@ -312,7 +306,6 @@ function calculateResults() {
   const minDiff = playerDistances[0].diff;
   const winners = playerDistances.filter(p => Math.abs(p.diff - minDiff) < 0.0001);
   const winner = winners.sort((a, b) => a.number - b.number)[0];
-
   game.winnerId = winner.id;
 
   const maxDiff = playerDistances[playerDistances.length - 1].diff;
@@ -338,9 +331,7 @@ function calculateResults() {
       numberCount[num].push(p.id);
     });
     Object.values(numberCount).forEach(ids => {
-      if (ids.length >= 2) {
-        duplicatedPlayerIds.push(...ids);
-      }
+      if (ids.length >= 2) duplicatedPlayerIds.push(...ids);
     });
   }
 
@@ -358,48 +349,23 @@ function calculateResults() {
   if (isRuleActive("reduced_range")) {
     alivePlayers.forEach(p => {
       const num = game.numbers[p.id];
-      if (num < 1 || num > 50) {
-        outOfRangePlayerIds.push(p.id);
-      }
+      if (num < 1 || num > 50) outOfRangePlayerIds.push(p.id);
     });
   }
 
   alivePlayers.forEach(p => {
     if (p.id === winner.id) {
-      if (exactMatchPlayerId && exactMatchPlayerId !== p.id) {
-        p.lives += 2;
-      }
-      if (duplicatedPlayerIds.includes(p.id)) {
-        p.lives += 1;
-      }
-      if (repeatedPlayerIds.includes(p.id)) {
-        p.lives += 2;
-      }
-      if (outOfRangePlayerIds.includes(p.id)) {
-        p.lives += 2;
-      }
+      if (exactMatchPlayerId && exactMatchPlayerId !== p.id) p.lives += 2;
+      if (duplicatedPlayerIds.includes(p.id)) p.lives += 1;
+      if (repeatedPlayerIds.includes(p.id)) p.lives += 2;
+      if (outOfRangePlayerIds.includes(p.id)) p.lives += 2;
     } else {
       p.lives += 1;
-
-      if (isRuleActive("double_punishment") && p.id === game.furthestPlayerId) {
-        p.lives += 1;
-      }
-
-      if (exactMatchPlayerId && exactMatchPlayerId !== p.id) {
-        p.lives += 2;
-      }
-
-      if (duplicatedPlayerIds.includes(p.id)) {
-        p.lives += 1;
-      }
-
-      if (repeatedPlayerIds.includes(p.id)) {
-        p.lives += 2;
-      }
-
-      if (outOfRangePlayerIds.includes(p.id)) {
-        p.lives += 2;
-      }
+      if (isRuleActive("double_punishment") && p.id === game.furthestPlayerId) p.lives += 1;
+      if (exactMatchPlayerId && exactMatchPlayerId !== p.id) p.lives += 2;
+      if (duplicatedPlayerIds.includes(p.id)) p.lives += 1;
+      if (repeatedPlayerIds.includes(p.id)) p.lives += 2;
+      if (outOfRangePlayerIds.includes(p.id)) p.lives += 2;
     }
 
     if (p.lives >= CONFIG.MAX_LIVES && p.alive) {
@@ -409,7 +375,6 @@ function calculateResults() {
   });
 
   game.previousNumbers = { ...game.numbers };
-
   game.roundHistory.push({
     round: game.round,
     numbers: { ...game.numbers },
@@ -429,10 +394,8 @@ function calculateResults() {
 function afterResults() {
   if (game.eliminatedThisRound.length > 0) {
     game.pendingRules = [];
-
     game.eliminatedThisRound.forEach(() => {
       const alivePlayers = getAlivePlayers();
-
       if (alivePlayers.length === 2 && !isRuleActive("zero_vs_hundred")) {
         game.pendingRules.push(FINAL_RULE);
       } else if (game.shuffledRules.length > 0) {
@@ -456,7 +419,6 @@ function showNextRule() {
     checkGameEnd();
     return;
   }
-
   const rule = game.pendingRules[game.currentRuleIndex];
   game.activeRules.push(rule);
   game.phase = "new-rule";
@@ -465,14 +427,12 @@ function showNextRule() {
 
 function checkGameEnd() {
   const alivePlayers = getAlivePlayers();
-
   if (alivePlayers.length <= 1) {
     game.phase = "finished";
     clearAllTimers();
     broadcastState();
     return;
   }
-
   game.round++;
   startCountdown();
 }
@@ -508,7 +468,6 @@ io.on("connection", (socket) => {
     });
 
     if (photo) playerPhotos[socket.id] = photo;
-
     broadcastState();
     io.emit("playerPhotos", getPlayerPhotosMap());
   });
@@ -517,12 +476,10 @@ io.on("connection", (socket) => {
     if (game.phase !== "lobby") return;
     const player = game.players.find(p => p.id === socket.id);
     if (!player || !player.host) return;
-
     if (game.players.length < CONFIG.MIN_PLAYERS_TO_START) {
       socket.emit("error", { message: `Mínimo ${CONFIG.MIN_PLAYERS_TO_START} jugadores` });
       return;
     }
-
     game.shuffledRules = shuffleArray([...RULES_POOL]);
     game.phase = "tutorial";
     game.tutorialSlide = 0;
@@ -533,7 +490,6 @@ io.on("connection", (socket) => {
     if (game.phase !== "tutorial") return;
     const player = game.players.find(p => p.id === socket.id);
     if (!player || !player.host) return;
-
     startCountdown();
   });
 
@@ -566,7 +522,6 @@ io.on("connection", (socket) => {
     if (game.phase !== "new-rule") return;
     const player = game.players.find(p => p.id === socket.id);
     if (!player || !player.host) return;
-
     game.currentRuleIndex++;
     showNextRule();
   });
@@ -574,14 +529,12 @@ io.on("connection", (socket) => {
   socket.on("resetGame", () => {
     const player = game.players.find(p => p.id === socket.id);
     if (!player || !player.host) return;
-
     clearAllTimers();
     const currentPlayers = game.players.map(p => ({
       ...p,
       lives: 0,
       alive: true
     }));
-
     game = createFreshGame();
     game.players = currentPlayers;
     broadcastState();
@@ -592,7 +545,6 @@ io.on("connection", (socket) => {
     game.players = game.players.filter(p => p.id !== socket.id);
     delete playerPhotos[socket.id];
     delete game.numbers[socket.id];
-
     reassignHost();
 
     if (game.phase !== "lobby" && game.phase !== "finished" && game.phase !== "tutorial") {

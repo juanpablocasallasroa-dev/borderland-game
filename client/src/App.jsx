@@ -22,7 +22,6 @@ const soundFiles = [
 ];
 
 let audioUnlocked = false;
-let globalMuted = false;
 
 function loadSounds() {
   soundFiles.forEach(name => {
@@ -68,7 +67,6 @@ function unlockAudio() {
 }
 
 function playSound(name, { loop = false, volume = 0.7 } = {}) {
-  if (globalMuted) return;
   try {
     const original = sounds[name];
     if (!original) return;
@@ -176,20 +174,9 @@ function App() {
   const [connected, setConnected] = useState(true);
   const [tutorialSlide, setTutorialSlide] = useState(0);
   const [tutorialDone, setTutorialDone] = useState(false);
-  const [muted, setMuted] = useState(false);
   const errorTimeout = useRef(null);
   const prevPhase = useRef(null);
   const prevTimer = useRef(null);
-
-  // Toggle mute
-  const toggleMute = () => {
-    const newMuted = !muted;
-    setMuted(newMuted);
-    globalMuted = newMuted;
-    if (newMuted) {
-      stopAllSounds();
-    }
-  };
 
   // Load sounds + unlock
   useEffect(() => {
@@ -356,7 +343,6 @@ function App() {
       return;
     }
 
-    // Comprimir imagen para móviles
     const reader = new FileReader();
     reader.onloadend = () => {
       const img = new Image();
@@ -411,19 +397,6 @@ function App() {
   };
 
   // ============================================
-  // MUTE BUTTON (shown on all screens)
-  // ============================================
-  const MuteButton = () => (
-    <button
-      className="mute-btn"
-      onClick={toggleMute}
-      title={muted ? "Activar sonido" : "Silenciar"}
-    >
-      {muted ? "🔇" : "🔊"}
-    </button>
-  );
-
-  // ============================================
   // RENDER: Connection
   // ============================================
   if (!connected) {
@@ -448,7 +421,6 @@ function App() {
   if (!joined) {
     return (
       <div className="screen register-screen">
-        <MuteButton />
         {error && <div className="error-toast">{error}</div>}
         <h1>BORDERLAND</h1>
         <div className="subtitle">King of Diamonds</div>
@@ -506,7 +478,6 @@ function App() {
   if (gameState.phase === "lobby") {
     return (
       <div className="screen lobby-screen">
-        <MuteButton />
         {error && <div className="error-toast">{error}</div>}
         <h1>SALA DE ESPERA</h1>
         <div className="player-count">
@@ -547,7 +518,6 @@ function App() {
 
     return (
       <div className="screen tutorial-screen" style={{ background: slide.bg }}>
-        <MuteButton />
         <div className="tutorial-progress">
           {TUTORIAL_SLIDES.map((_, i) => (
             <div key={i} className={`tutorial-dot ${i <= tutorialSlide ? "active" : ""}`} />
@@ -592,7 +562,6 @@ function App() {
   if (gameState.phase === "countdown") {
     return (
       <div className="screen countdown-screen">
-        <MuteButton />
         <div className="round-indicator">RONDA {gameState.round}</div>
         <div className="countdown-number">{gameState.timer}</div>
 
@@ -621,7 +590,6 @@ function App() {
 
     return (
       <div className="screen round-screen">
-        <MuteButton />
         {error && <div className="error-toast">{error}</div>}
 
         <div className="round-header">
@@ -701,7 +669,6 @@ function App() {
 
     return (
       <div className={`results-screen ${resultsStep >= 5 ? "flash" : ""}`}>
-        <MuteButton />
         <div className="results-round-label">
           RONDA {gameState.round} — RESULTADOS
         </div>
@@ -806,7 +773,6 @@ function App() {
 
     return (
       <div className="screen new-rule-screen">
-        <MuteButton />
         <div className="new-rule-header">NUEVA REGLA</div>
 
         <div className="new-rule-card">
@@ -852,7 +818,6 @@ function App() {
 
     return (
       <div className="screen finished-screen">
-        <MuteButton />
         <h1>SUPERVIVIENTE</h1>
         {winner && (
           <div className="winner-display">
